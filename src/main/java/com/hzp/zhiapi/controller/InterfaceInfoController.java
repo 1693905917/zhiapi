@@ -2,21 +2,22 @@ package com.hzp.zhiapi.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.google.gson.Gson;
 import com.hzp.zhiapi.annotation.AuthCheck;
-import com.hzp.zhiapi.common.BaseResponse;
-import com.hzp.zhiapi.common.DeleteRequest;
-import com.hzp.zhiapi.common.ErrorCode;
-import com.hzp.zhiapi.common.ResultUtils;
+import com.hzp.zhiapi.common.*;
 import com.hzp.zhiapi.constant.CommonConstant;
 import com.hzp.zhiapi.exception.BusinessException;
 
 import com.hzp.zhiapi.model.dto.interfaceinfo.InterfaceInfoAddRequest;
+import com.hzp.zhiapi.model.dto.interfaceinfo.InterfaceInfoInvokeRequest;
 import com.hzp.zhiapi.model.dto.interfaceinfo.InterfaceInfoQueryRequest;
 import com.hzp.zhiapi.model.dto.interfaceinfo.InterfaceInfoUpdateRequest;
 import com.hzp.zhiapi.model.entity.InterfaceInfo;
 import com.hzp.zhiapi.model.entity.User;
+import com.hzp.zhiapi.model.enums.InterfaceInfoStatusEnum;
 import com.hzp.zhiapi.service.InterfaceInfoService;
 import com.hzp.zhiapi.service.UserService;
+import com.hzp.zhiapiclientsdk.client.ZhiApiClient;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
@@ -27,7 +28,7 @@ import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 /**
- * 帖子接口
+ * 接口管理
  *
  * @author hzp
  */
@@ -41,6 +42,9 @@ public class InterfaceInfoController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private ZhiApiClient zhiApiClient;
 
     // region 增删改查
 
@@ -127,6 +131,122 @@ public class InterfaceInfoController {
         }
         boolean result = interfaceInfoService.updateById(interfaceInfo);
         return ResultUtils.success(result);
+    }
+
+    /**
+     * 发布
+     *
+     * @param idRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/online")
+    @AuthCheck(mustRole = "admin")
+    public BaseResponse<Boolean> onlineInterfaceInfo(@RequestBody IdRequest idRequest,
+                                                     HttpServletRequest request) {
+        if (idRequest == null || idRequest.getId() <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        // 1.校验该接口是否存在
+        long id = idRequest.getId();
+        InterfaceInfo oldInterfaceInfo = interfaceInfoService.getById(id);
+        if (oldInterfaceInfo == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        }
+        // 2.判断该接口是否可以调用
+        // 创建一个User对象(这里先模拟一下，搞个假数据)
+        com.hzp.zhiapiclientsdk.model.User user = new com.hzp.zhiapiclientsdk.model.User();
+        // 设置user对象的username属性为"test"
+        user.setUsername("test");
+        // 通过yuApiClient的getUsernameByPost方法传入user对象，并将返回的username赋值给username变量
+        //TODO 还有一个小问题需要注意，我们的接口名称都是固定的，而不是通过地址来映射到相应的接口，所以只能通过方法名调用接口。先记录下这个问题，后续开发过程中解决它，本期先走通整个流程（下次一定）。
+        String username = zhiApiClient.getUserNameByPost(user);
+        // 如果username为空或空白字符串
+        if (StringUtils.isBlank(username)) {
+            // 抛出系统错误的业务异常，表示系统内部异常，并附带错误信息"接口验证失败"
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "接口验证失败");
+        }
+        // 创建一个InterfaceInfo对象
+        InterfaceInfo interfaceInfo = new InterfaceInfo();
+        // 设置interfaceInfo的id属性为id
+        interfaceInfo.setId(id);
+        // 3.修改接口数据库中的状态字段为 1
+        interfaceInfo.setStatus(InterfaceInfoStatusEnum.ONLINE.getValue());
+        // 调用interfaceInfoService的updateById方法，传入interfaceInfo对象，并将返回的结果赋值给result变量
+        boolean result = interfaceInfoService.updateById(interfaceInfo);
+        // 返回一个成功的响应，响应体中携带result值
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 下线
+     *
+     * @param idRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/offline")
+    @AuthCheck(mustRole = "admin")
+    public BaseResponse<Boolean> offlineInterfaceInfo(@RequestBody IdRequest idRequest,
+                                                     HttpServletRequest request) {
+        if (idRequest == null || idRequest.getId() <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        // 1.校验该接口是否存在
+        long id = idRequest.getId();
+        InterfaceInfo oldInterfaceInfo = interfaceInfoService.getById(id);
+        if (oldInterfaceInfo == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        }
+        InterfaceInfo interfaceInfo = new InterfaceInfo();
+        interfaceInfo.setId(id);
+        // 2.修改接口数据库中的状态字段为 1
+        interfaceInfo.setStatus(InterfaceInfoStatusEnum.OFFLINE.getValue());
+        // 调用interfaceInfoService的updateById方法，传入interfaceInfo对象，并将返回的结果赋值给result变量
+        boolean result = interfaceInfoService.updateById(interfaceInfo);
+        // 返回一个成功的响应，响应体中携带result值
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 测试调用
+     *
+     * @param interfaceInfoInvokeRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/invoke")
+    // 这里给它新封装一个参数InterfaceInfoInvokeRequest
+    // 返回结果把对象发出去就好了，因为不确定接口的返回值到底是什么
+    public BaseResponse<Object> invokeInterfaceInfo(@RequestBody InterfaceInfoInvokeRequest interfaceInfoInvokeRequest,
+                                                    HttpServletRequest request) {
+        if (interfaceInfoInvokeRequest == null || interfaceInfoInvokeRequest.getId() <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        long id = interfaceInfoInvokeRequest.getId();
+        String userRequestParams = interfaceInfoInvokeRequest.getUserRequestParams();
+        InterfaceInfo oldInterfaceInfo = interfaceInfoService.getById(id);
+        if (oldInterfaceInfo == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        }
+        if (oldInterfaceInfo.getStatus() == InterfaceInfoStatusEnum.OFFLINE.getValue()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "接口已关闭");
+        }
+        // 获取当前登录用户的ak和sk，这样相当于用户自己的这个身份去调用，
+        // 也不会担心它刷接口，因为知道是谁刷了这个接口，会比较安全
+        User loginUser = userService.getLoginUser(request);
+        String accessKey = loginUser.getAccessKey();
+        String secretKey = loginUser.getSecretKey();
+        //TODO 创建一个临时YuApiClient对象，传入accessKey和secretKey
+        ZhiApiClient tempClient = new ZhiApiClient(accessKey, secretKey);
+        // 我们只需要进行测试调用，所以我们需要解析传递过来的参数。
+        Gson gson = new Gson();
+        // 将用户请求参数转换为com.yupi.yuapiclientsdk.model.User对象
+        com.hzp.zhiapiclientsdk.model.User user = gson.fromJson(userRequestParams, com.hzp.zhiapiclientsdk.model.User.class);
+        // 调用YuApiClient的getUsernameByPost方法，传入用户对象，获取用户名
+        String usernameByPost = tempClient.getUserNameByPost(user);
+        // 返回成功响应，并包含调用结果
+        return ResultUtils.success(usernameByPost);
     }
 
     /**
